@@ -8,6 +8,7 @@
 #include <fcntl.h>
 #include <errno.h>
 #include <dirent.h>
+#include <sys/wait.h>
 
 #define MAX_NAME 64
 #define MAX_CATEGORY 32
@@ -528,6 +529,64 @@ void check_links() {
 
     closedir(dir);
 }
+// Function to delete a district folder and its symlink using a child process
+void remove_district(const char *district, const char *role) {
+    // 1. Role Check
+    if (strcmp(role, "manager") != 0) {
+        printf("Error: Only users with the 'manager' role can remove districts.\n");
+        return;
+    }
+
+    // 2. CRITICAL SAFETY CHECK
+    // Prevent directory traversal attacks or root deletion (e.g., "../" or "/")
+    if (strchr(district, '/') != NULL || strstr(district, "..") != NULL) {
+        printf("Error: Invalid district name. Unsafe characters detected.\n");
+        return;
+    }
+
+    // 3. Remove the symbolic link using unlink()
+    char symlink_name[256];
+    snprintf(symlink_name, sizeof(symlink_name), "active_reports-%s", district);
+    if (unlink(symlink_name) == 0) {
+        printf("Removed symbolic link: %s\n", symlink_name);
+    } else {
+        perror("Warning: Could not remove symbolic link (maybe it didn't exist?)");
+    }
+
+    // 4. Create a child process to run 'rm -rf'
+    printf("Preparing to delete district folder: %s...\n", district);
+    
+    pid_t pid = fork();
+
+    if (pid < 0) {
+        // Fork failed
+        perror("Error: Failed to fork process");
+    } 
+    else if (pid == 0) {
+        // CHILD PROCESS
+        // execlp replaces this child process with the 'rm' command.
+        // Arguments: executable name, arg0, arg1, arg2, NULL (to terminate the list)
+        execlp("rm", "rm", "-rf", district, NULL);
+        
+        // If execlp is successful, the child process is completely replaced.
+        // Therefore, the code below this line ONLY runs if execlp fails!
+        perror("Error: execlp failed to execute rm");
+        exit(1); 
+    } 
+    else {
+        // PARENT PROCESS
+        // Wait for the specific child process to finish its job
+        int status;
+        waitpid(pid, &status, 0);
+        
+        if (WIFEXITED(status) && WEXITSTATUS(status) == 0) {
+            printf("Success: District '%s' and all its contents have been deleted.\n", district);
+        } else {
+            printf("Error: The rm command did not complete successfully.\n");
+        }
+    }
+}
+
 int main(int argc, char *argv[]) {
     if (argc < 6) {
         fprintf(stderr, "Usage: %s --role <role> --user <username> --<command> <district> [args...]\n", argv[0]);
@@ -562,7 +621,7 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    if (strcmp(command, "check_links") != 0) {
+    if (strcmp(command, "check_links") != 0 && strcmp(command, "remove_district") != 0) {
         setup_district(district);
     }
 
@@ -592,10 +651,13 @@ int main(int argc, char *argv[]) {
         else filter_reports(district, num_conditions, &argv[condition_start_index]);
     } else if (strcmp(command, "check_links") == 0) {
         check_links();
+    // --- NEW: Phase 2 Remove District ---
+    } else if (strcmp(command, "remove_district") == 0) {
+        // District name is already parsed into the 'district' variable!
+        remove_district(district, role);
     } else {
         printf("Command '--%s' is not implemented yet.\n", command);
     }
 
     return 0;
-
 }
