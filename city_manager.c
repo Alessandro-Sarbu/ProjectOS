@@ -9,6 +9,7 @@
 #include <errno.h>
 #include <dirent.h>
 #include <sys/wait.h>
+#include <signal.h>
 
 #define MAX_NAME 64
 #define MAX_CATEGORY 32
@@ -183,6 +184,40 @@ void add_report(const char *district, const char *inspector_name, const char *ro
 
     if (chmod(filepath, 0664) < 0) {
         perror("Error setting 664 permissions on reports.dat");
+    }
+    
+    FILE *pid_file = fopen(".monitor_pid", "r");
+    int monitor_pid = -1;
+    int signal_success = 0;
+
+    if (pid_file != NULL) {
+        if (fscanf(pid_file, "%d", &monitor_pid) == 1) {
+            if (kill(monitor_pid, SIGUSR1) == 0) {
+                signal_success = 1;
+            }
+        }
+        fclose(pid_file);
+    }
+
+    char log_filepath[512];
+    snprintf(log_filepath, sizeof(log_filepath), "%s/logged_district", district);
+    
+    FILE *log_file = fopen(log_filepath, "a");
+    if (log_file != NULL) {
+        char time_str[64];
+        struct tm *tm_info = localtime(&new_report.timestamp);
+        strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", tm_info);
+
+        if (signal_success) {
+            fprintf(log_file, "[%s] Report ID %d added. Monitor (PID %d) successfully notified.\n", time_str, next_id, monitor_pid);
+            printf("--> System: Successfully notified the monitor program.\n");
+        } else {
+            fprintf(log_file, "[%s] Report ID %d added. ERROR: Could not inform monitor program.\n", time_str, next_id);
+            printf("--> System: Warning - Monitor program is not running. Could not send notification.\n");
+        }
+        fclose(log_file);
+    } else {
+        perror("Error: Could not open logged_district to write log entry");
     }
 }
 
@@ -529,22 +564,19 @@ void check_links() {
 
     closedir(dir);
 }
-// Function to delete a district folder and its symlink using a child process
+
 void remove_district(const char *district, const char *role) {
-    // 1. Role Check
     if (strcmp(role, "manager") != 0) {
         printf("Error: Only users with the 'manager' role can remove districts.\n");
         return;
     }
 
-    // 2. CRITICAL SAFETY CHECK
-    // Prevent directory traversal attacks or root deletion (e.g., "../" or "/")
+    
     if (strchr(district, '/') != NULL || strstr(district, "..") != NULL) {
         printf("Error: Invalid district name. Unsafe characters detected.\n");
         return;
     }
 
-    // 3. Remove the symbolic link using unlink()
     char symlink_name[256];
     snprintf(symlink_name, sizeof(symlink_name), "active_reports-%s", district);
     if (unlink(symlink_name) == 0) {
@@ -553,29 +585,23 @@ void remove_district(const char *district, const char *role) {
         perror("Warning: Could not remove symbolic link (maybe it didn't exist?)");
     }
 
-    // 4. Create a child process to run 'rm -rf'
     printf("Preparing to delete district folder: %s...\n", district);
     
     pid_t pid = fork();
 
     if (pid < 0) {
-        // Fork failed
         perror("Error: Failed to fork process");
     } 
     else if (pid == 0) {
-        // CHILD PROCESS
-        // execlp replaces this child process with the 'rm' command.
-        // Arguments: executable name, arg0, arg1, arg2, NULL (to terminate the list)
+        
         execlp("rm", "rm", "-rf", district, NULL);
         
-        // If execlp is successful, the child process is completely replaced.
-        // Therefore, the code below this line ONLY runs if execlp fails!
+        
         perror("Error: execlp failed to execute rm");
         exit(1); 
     } 
     else {
-        // PARENT PROCESS
-        // Wait for the specific child process to finish its job
+        
         int status;
         waitpid(pid, &status, 0);
         
@@ -651,9 +677,7 @@ int main(int argc, char *argv[]) {
         else filter_reports(district, num_conditions, &argv[condition_start_index]);
     } else if (strcmp(command, "check_links") == 0) {
         check_links();
-    // --- NEW: Phase 2 Remove District ---
     } else if (strcmp(command, "remove_district") == 0) {
-        // District name is already parsed into the 'district' variable!
         remove_district(district, role);
     } else {
         printf("Command '--%s' is not implemented yet.\n", command);
