@@ -11,3 +11,6 @@ The AI came back with a solution for `parse_condition`. Instead of writing a com
 
 What I changed/learned:
 The project hints specifically warned us to watch out for how the AI handles type conversions, so I went through the `match_condition` logic carefully. It correctly used `atoi()` to turn the severity string into a real integer, and `atol()` to cast the timestamp. Because it did this, the greater-than and less-than operators evaluated the actual numbers, rather than accidentally doing weird character comparison. 
+
+Phase 2: Processes and Signals
+For this phase, I used the AI mostly as a quick reference for the specific syntax of system calls. It helped me set up the sigaction structures and the fork() logic to make sure the parent and child processes were handled correctly. I also used it to double-check the best way to handle global flags and to clear up some minor compiler warnings. Most of the coding was based on the existing Phase 1 structure.
