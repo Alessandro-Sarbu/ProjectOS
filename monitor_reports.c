@@ -18,6 +18,18 @@ void handle_sigusr1(int sig) {
 }
 
 int main() {
+    // --- NEW: Phase 3 Startup Check ---
+    FILE *check_file = fopen(".monitor_pid", "r");
+    if (check_file != NULL) {
+        int existing_pid = -1;
+        if (fscanf(check_file, "%d", &existing_pid) == 1) {
+            printf("ERROR_ALREADY_RUNNING:%d\n", existing_pid);
+            fflush(stdout);
+            fclose(check_file);
+            exit(1);
+        }
+        fclose(check_file);
+    }
     pid_t pid = getpid();
     FILE *pid_file = fopen(".monitor_pid", "w");
     if (pid_file == NULL) {
